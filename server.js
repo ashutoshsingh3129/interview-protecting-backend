@@ -14,10 +14,9 @@ app.use(cors());
 app.use(bodyParser.json());
 
 // ================= DB CONNECTION =================
-mongoose
-  .connect(process.env.MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true })
+mongoose.connect(process.env.MONGO_URI)
   .then(() => console.log("✅ MongoDB connected"))
-  .catch((err) => console.error("❌ Mongo error:", err));
+  .catch((err) => console.error("❌ MongoDB connection error:", err));
 
 // ================= SCHEMAS =================
 const EventSchema = new mongoose.Schema({
@@ -44,21 +43,27 @@ const ReportSchema = new mongoose.Schema({
 const Report = mongoose.model("Report", ReportSchema);
 
 // ================= FILE STORAGE =================
+
+
+
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    const dir = "uploads";
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir);
+    const dir = isProd ? "/tmp" : "uploads";
+
+    if (!isProd && !fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true }); // only try locally
+    }
+
     cb(null, dir);
   },
   filename: (req, file, cb) => {
     cb(null, Date.now() + path.extname(file.originalname));
   },
 });
+
 const upload = multer({ storage });
 
 // ================= ROUTES =================
-
-// Upload Report + Video
 app.post(
   "/upload",
   upload.fields([
@@ -93,6 +98,7 @@ app.post(
   }
 );
 
+
 // Get All Reports
 app.get("/reports", async (req, res) => {
   const reports = await Report.find().sort({ _id: -1 });
@@ -112,19 +118,19 @@ app.get("/reports/:id/video", async (req, res) => {
       return res.status(404).json({ error: "Video not found" });
     }
 
-    const filePath = path.resolve(report.videoPath);
-    if (!fs.existsSync(filePath)) {
-      return res.status(404).json({ error: "Video file missing on server" });
-    }
-
-    res.download(filePath, `interview_${report._id}.webm`);
+    // Directly stream the file instead of download
+    res.sendFile(report.videoPath, (err) => {
+      if (err) {
+        console.error("Send video error:", err);
+        res.status(500).json({ error: "Failed to send video" });
+      }
+    });
   } catch (err) {
     console.error("Download video error:", err);
     res.status(500).json({ error: "Failed to download video" });
   }
 });
 
-// ✅ Download PDF Report
 app.get("/reports/:id/pdf", async (req, res) => {
   try {
     const report = await Report.findById(req.params.id);
@@ -132,17 +138,18 @@ app.get("/reports/:id/pdf", async (req, res) => {
       return res.status(404).json({ error: "PDF not found" });
     }
 
-    const filePath = path.resolve(report.pdfPath);
-    if (!fs.existsSync(filePath)) {
-      return res.status(404).json({ error: "PDF file missing on server" });
-    }
-
-    res.download(filePath, `report_${report._id}.pdf`);
+    res.sendFile(report.pdfPath, (err) => {
+      if (err) {
+        console.error("Send PDF error:", err);
+        res.status(500).json({ error: "Failed to send PDF" });
+      }
+    });
   } catch (err) {
     console.error("Download PDF error:", err);
     res.status(500).json({ error: "Failed to download PDF" });
   }
 });
+
 // Serve uploaded files
 app.use("/uploads", express.static("uploads"));
 
