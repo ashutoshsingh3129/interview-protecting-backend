@@ -59,30 +59,39 @@ const upload = multer({ storage });
 // ================= ROUTES =================
 
 // Upload Report + Video
-app.post("/upload", upload.fields([{ name: "video" }, { name: "reportPdf" }]), async (req, res) => {
-  try {
-    const { report } = req.body;
-    if (!report) return res.status(400).json({ error: "Missing report JSON" });
+app.post(
+  "/upload",
+  upload.fields([
+    { name: "video", maxCount: 1 },
+    { name: "pdf", maxCount: 1 },
+  ]),
+  async (req, res) => {
+    try {
+      if (!req.body.report) {
+        return res.status(400).json({ error: "Missing report JSON" });
+      }
 
-    const parsedReport = JSON.parse(report);
+      const parsedReport = JSON.parse(req.body.report);
 
-    const videoPath = req.files["video"] ? req.files["video"][0].path : null;
-    const pdfPath = req.files["reportPdf"] ? req.files["reportPdf"][0].path : null;
+      // Paths for uploaded files
+      const videoPath = req.files["video"] ? req.files["video"][0].path : null;
+      const pdfPath = req.files["pdf"] ? req.files["pdf"][0].path : null;
 
-    const newReport = new Report({
-      ...parsedReport,
-      videoPath,
-      pdfPath,
-    });
+      const newReport = new Report({
+        ...parsedReport,
+        videoPath,
+        pdfPath,
+      });
 
-    await newReport.save();
+      await newReport.save();
 
-    res.json({ success: true, id: newReport._id });
-  } catch (err) {
-    console.error("Upload error:", err);
-    res.status(500).json({ error: "Upload failed" });
+      res.json({ success: true, id: newReport._id });
+    } catch (err) {
+      console.error("Upload error:", err);
+      res.status(500).json({ error: "Upload failed" });
+    }
   }
-});
+);
 
 // Get All Reports
 app.get("/reports", async (req, res) => {
@@ -96,7 +105,44 @@ app.get("/reports/:id", async (req, res) => {
   if (!report) return res.status(404).json({ error: "Report not found" });
   res.json(report);
 });
+app.get("/reports/:id/video", async (req, res) => {
+  try {
+    const report = await Report.findById(req.params.id);
+    if (!report || !report.videoPath) {
+      return res.status(404).json({ error: "Video not found" });
+    }
 
+    const filePath = path.resolve(report.videoPath);
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ error: "Video file missing on server" });
+    }
+
+    res.download(filePath, `interview_${report._id}.webm`);
+  } catch (err) {
+    console.error("Download video error:", err);
+    res.status(500).json({ error: "Failed to download video" });
+  }
+});
+
+// ✅ Download PDF Report
+app.get("/reports/:id/pdf", async (req, res) => {
+  try {
+    const report = await Report.findById(req.params.id);
+    if (!report || !report.pdfPath) {
+      return res.status(404).json({ error: "PDF not found" });
+    }
+
+    const filePath = path.resolve(report.pdfPath);
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ error: "PDF file missing on server" });
+    }
+
+    res.download(filePath, `report_${report._id}.pdf`);
+  } catch (err) {
+    console.error("Download PDF error:", err);
+    res.status(500).json({ error: "Failed to download PDF" });
+  }
+});
 // Serve uploaded files
 app.use("/uploads", express.static("uploads"));
 
